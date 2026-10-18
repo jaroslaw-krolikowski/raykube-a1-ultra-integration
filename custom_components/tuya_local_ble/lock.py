@@ -27,7 +27,6 @@ from homeassistant.const import (
 )
 
 from .commands import (
-    CALIBRATION_COOLDOWN,
     COMMAND_LOCK,
     COMMAND_UNLOCK,
     async_calibrate,
@@ -321,25 +320,21 @@ class TuyaBLELock(TuyaBLEEntity, LockEntity):
         if not self._is_raykube:
             return None
         guard = get_command_guard(self._device)
-        last_calibration = guard.last_calibration
-        blocked = guard.calibration_blocked_for()
+
+        def iso(timestamp: float | None) -> str | None:
+            if timestamp is None:
+                return None
+            return datetime.fromtimestamp(timestamp).astimezone().isoformat()
+
         return {
             # False: the lock did not report its state after the last command,
             # so the shown state is the last one the lock reported.
             "last_command": self._last_command,
             "command_confirmed": self._command_confirmed,
-            "last_calibration": (
-                datetime.fromtimestamp(last_calibration).astimezone().isoformat()
-                if last_calibration
-                else None
-            ),
-            "calibration_blocked_until": (
-                datetime.fromtimestamp(last_calibration + CALIBRATION_COOLDOWN)
-                .astimezone()
-                .isoformat()
-                if blocked
-                else None
-            ),
+            "last_calibration": iso(guard.last_calibration),
+            # Unlock (and calibration) wait COMMAND_COOLDOWN s after any command.
+            "unlock_blocked_until": iso(guard.unlock_blocked_until()),
+            "calibration_blocked_until": iso(guard.calibration_blocked_until()),
         }
 
     def _update_attrs(self) -> None:
@@ -448,6 +443,7 @@ class TuyaBLELock(TuyaBLEEntity, LockEntity):
                 self._update_attrs()
                 self.async_write_ha_state()
             raise
+        self.async_write_ha_state()  # unlock_blocked_until
         if self._pending_since != since or self._pending_target is None:
             return  # replaced, or the lock already reported its state
         self._unsub_confirm_timeout = async_call_later(

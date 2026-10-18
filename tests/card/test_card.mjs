@@ -106,6 +106,23 @@ await action.click();
 assert.deepEqual(await calls(), [["lock", "lock", { entity_id: LOCK }]]);
 await setLock("locked");
 
+// No second unlock for 30 s after a command: the button counts down
+await setLock("locked", { unlock_blocked_until: new Date(Date.now() + 25000).toISOString() });
+assert.equal(await action.isDisabled(), true);
+assert.match((await action.textContent()).trim(), /^Za (24|25) s$/);
+await action.click({ force: true });
+assert.deepEqual(await calls(), []);
+if (shots) await page.locator("#host").screenshot({ path: path.join(shots, "3b-tile-unlock-wait.png") });
+await page.locator("raykube-lock-card .more").click();
+const waitPanel = page.locator("raykube-lock-panel");
+assert.equal(await waitPanel.locator('[data-act="unlock"]').isDisabled(), true);
+assert.equal(await waitPanel.locator('[data-act="lock"]').isDisabled(), false); // locking never waits
+assert.match(await waitPanel.locator('[data-act="unlock"]').textContent(), /Za (24|25) s/);
+await waitPanel.locator('[data-act="close"]').click();
+await setLock("locked", { unlock_blocked_until: null });
+assert.equal(await action.isDisabled(), false);
+assert.equal((await action.textContent()).trim(), "Otwórz");
+
 // Long press opens the panel (and the click right after does not close it)
 const box = await tile.boundingBox();
 await page.mouse.move(box.x + 60, box.y + box.height / 2);

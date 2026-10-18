@@ -5,7 +5,9 @@ succession used to queue up and run minutes later. Rules:
 
 - lock is always accepted: it drops a pending unlock or calibration that
   has not reached the lock yet, and a second lock joins the first;
-- unlock and calibration are refused while another command is pending;
+- unlock and calibration are refused while another command is pending,
+  and for COMMAND_COOLDOWN seconds after any command (e.g. no second unlock
+  right after locking or unlocking);
 - calibration is refused for CALIBRATION_COOLDOWN seconds after the last one.
 
 Each write also has a deadline in the protocol layer
@@ -31,6 +33,7 @@ COMMAND_UNLOCK = "unlock"
 COMMAND_CALIBRATE = "calibrate"
 
 CALIBRATION_COOLDOWN = 120
+COMMAND_COOLDOWN = 30
 
 
 class LockCommandGuard:
@@ -40,6 +43,7 @@ class LockCommandGuard:
         self._task: asyncio.Task | None = None
         self._kind: str | None = None
         self._last_calibration: float | None = None  # time.time()
+        self._last_command: float | None = None  # time.time()
 
     @property
     def pending(self) -> str | None:
@@ -52,11 +56,30 @@ class LockCommandGuard:
     def last_calibration(self) -> float | None:
         return self._last_calibration
 
+    def unlock_blocked_until(self) -> float | None:
+        """time.time() until which unlock is refused; None = allowed. Lock never waits."""
+        if self._last_command is None:
+            return None
+        until = self._last_command + COMMAND_COOLDOWN
+        return until if until > time.time() else None
+
+    def calibration_blocked_until(self) -> float | None:
+        """time.time() until which calibration is refused; None = allowed."""
+        candidates = [self.unlock_blocked_until()]
+        if self._last_calibration is not None:
+            candidates.append(self._last_calibration + CALIBRATION_COOLDOWN)
+        until = max((c for c in candidates if c is not None), default=None)
+        return until if until is not None and until > time.time() else None
+
+    def unlock_blocked_for(self) -> float:
+        """Seconds until unlock may be sent again (0 = now)."""
+        until = self.unlock_blocked_until()
+        return max(0.0, until - time.time()) if until else 0.0
+
     def calibration_blocked_for(self) -> float:
         """Seconds until calibration may run again (0 = now)."""
-        if self._last_calibration is None:
-            return 0.0
-        return max(0.0, self._last_calibration + CALIBRATION_COOLDOWN - time.time())
+        until = self.calibration_blocked_until()
+        return max(0.0, until - time.time()) if until else 0.0
 
     async def run(self, kind: str, send: Callable[[], Awaitable[None]]) -> None:
         pending = self.pending
@@ -74,6 +97,14 @@ class LockCommandGuard:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
+        if kind == COMMAND_UNLOCK:
+            blocked = self.unlock_blocked_for()
+            if blocked > 0:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="command_cooldown",
+                    translation_placeholders={"seconds": str(int(blocked) + 1)},
+                )
         if kind == COMMAND_CALIBRATE:
             blocked = self.calibration_blocked_for()
             if blocked > 0:
@@ -82,9 +113,12 @@ class LockCommandGuard:
                     translation_key="calibration_cooldown",
                     translation_placeholders={"seconds": str(int(blocked) + 1)},
                 )
-            # Counted from the request: a calibration that timed out may still
-            # have reached the lock.
-            self._last_calibration = time.time()
+        # Counted from the request: a command that timed out may still have
+        # reached the lock.
+        now = time.time()
+        self._last_command = now
+        if kind == COMMAND_CALIBRATE:
+            self._last_calibration = now
         self._kind = kind
         self._task = asyncio.ensure_future(send())
         await self._wait(self._task)
