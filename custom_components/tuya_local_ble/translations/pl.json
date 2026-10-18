@@ -29,12 +29,9 @@
     "step": {
       "init": {
         "title": "Opcje Tuya BLE",
-        "description": "Jak Home Assistant łączy się z zamkiem na baterie, który śpi między komendami (Raykube A1 Ultra). Inne urządzenia ignorują to ustawienie.",
+        "description": "Jak Home Assistant łączy się z zamkiem na baterie, który śpi między komendami (Raykube A1 Ultra). Inne urządzenia ignorują to ustawienie.\n\nPowiadomienia trybu uzbrojenia wymagają, żeby HA szybko dowiadywał się o ręcznym przekręceniu: wybierz „Stałe połączenie” albo „Po zmianie rozgłaszania”, jeśli zamek sygnalizuje zmiany w rozgłaszaniu (zob. sensor Połączenie). Aplikacja Tuya nie połączy się z zamkiem, dopóki HA trzyma połączenie.",
         "data": {
           "connection_mode": "Tryb połączenia"
-        },
-        "data_description": {
-          "connection_mode": "Powiadomienia trybu uzbrojenia wymagają, żeby HA szybko dowiadywał się o ręcznym przekręceniu: wybierz „Stałe połączenie” albo „Po zmianie rozgłaszania”, jeśli zamek sygnalizuje zmiany w rozgłaszaniu (zob. sensor Połączenie). Aplikacja Tuya nie połączy się z zamkiem, dopóki HA trzyma połączenie."
         }
       }
     }

@@ -28,12 +28,9 @@
     "step": {
       "init": {
         "title": "Tuya BLE options",
-        "description": "How Home Assistant talks to a battery lock that sleeps between commands (Raykube A1 Ultra). Other devices ignore this setting.",
+        "description": "How Home Assistant talks to a battery lock that sleeps between commands (Raykube A1 Ultra). Other devices ignore this setting.\n\nArming-mode notifications need HA to learn about a manual turn quickly: choose \"Permanent connection\", or \"On advertisement change\" if the lock signals changes in its advertisements (see the Connection sensor). The Tuya app cannot connect while HA holds the connection.",
         "data": {
           "connection_mode": "Connection mode"
-        },
-        "data_description": {
-          "connection_mode": "Arming-mode notifications need HA to learn about a manual turn quickly: choose \"Permanent connection\", or \"On advertisement change\" if the lock signals changes in its advertisements (see the Connection sensor). The Tuya app cannot connect while HA holds the connection."
         }
       }
     }
