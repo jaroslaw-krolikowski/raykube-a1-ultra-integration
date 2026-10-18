@@ -1,6 +1,7 @@
 {
   "exceptions": {
     "command_timeout": "The lock did not take the command within {seconds} s. The command was dropped and will not run later. Check the lock on site.",
+    "command_cooldown": "Unlocking is blocked for 30 s after the last command. Try again in {seconds} s.",
     "command_pending": "The previous command ({command}) is still on its way to the lock. Wait for it to finish.",
     "command_replaced": "Dropped: a lock command was sent before this one reached the lock.",
     "calibration_cooldown": "Calibration was started less than 2 minutes ago. Try again in {seconds} s.",

@@ -150,7 +150,10 @@ def test_calibration_pressed_several_times_runs_once():
 def test_lock_is_always_possible():
     async def scenario(hass):
         device, entity, fake = await make_lock(hass)
-        with patch.object(lock_platform, "RAYKUBE_CONFIRM_TIMEOUT", 5):
+        # The 30 s unlock block has its own test; here unlock may follow lock.
+        with patch.object(lock_platform, "RAYKUBE_CONFIRM_TIMEOUT", 5), patch.object(
+            commands, "COMMAND_COOLDOWN", 0
+        ):
             await entity.async_calibrate()  # starts the calibration cooldown
             await entity.async_lock()  # cooldown does not block locking
             assert fake.sent == [CALIBRATE, LOCK]
@@ -231,5 +234,37 @@ def test_calibrate_button_shares_the_cooldown_with_the_card():
         with pytest.raises(HomeAssistantError):
             await entity.async_calibrate()  # the card's action too
         assert fake.sent.count(CALIBRATE) == 1
+
+    run(scenario)
+
+
+def test_no_second_unlock_for_30_s_after_a_command():
+    async def scenario(hass):
+        device, entity, fake = await make_lock(hass)
+        with patch.object(lock_platform, "RAYKUBE_CONFIRM_TIMEOUT", 5):
+            await entity.async_lock()
+            attrs = entity.extra_state_attributes
+            assert attrs["unlock_blocked_until"] and attrs["calibration_blocked_until"]
+            with pytest.raises(HomeAssistantError) as err:
+                await entity.async_unlock()  # right after locking
+            assert err.value.translation_key == "command_cooldown"
+            with pytest.raises(HomeAssistantError) as err:
+                await entity.async_calibrate()
+            assert err.value.translation_key == "calibration_cooldown"
+            await entity.async_lock()  # locking never waits
+            assert fake.sent == [LOCK, LOCK]
+
+            with patch.object(commands, "COMMAND_COOLDOWN", 0):
+                await entity.async_unlock()
+            with pytest.raises(HomeAssistantError) as err:
+                await entity.async_unlock()  # a second unlock
+            assert err.value.translation_key == "command_cooldown"
+            assert fake.sent == [LOCK, LOCK, UNLOCK]
+
+            guard = commands.get_command_guard(device)
+            guard._last_command -= commands.COMMAND_COOLDOWN  # 30 s later
+            assert entity.extra_state_attributes["unlock_blocked_until"] is None
+            await entity.async_unlock()
+            assert fake.sent == [LOCK, LOCK, UNLOCK, UNLOCK]
 
     run(scenario)

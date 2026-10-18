@@ -9,6 +9,7 @@
  * Locking is always possible: while an unlock is on its way the button
  * locks. "Locking…" / "Unlocking…" stay until the lock reports its state;
  * when it does not, the card says so instead of showing the commanded state.
+ * Unlocking waits 30 s after any command (countdown on the button).
  * Calibration (tuya_local_ble.calibrate) asks for confirmation, warns what it
  * does and is available once every 2 minutes.
  *
@@ -33,7 +34,7 @@
  * Look follows shadcn/ui; icons are Lucide (https://lucide.dev, ISC license).
  */
 
-const CARD_VERSION = "1.6.0";
+const CARD_VERSION = "1.7.0";
 const HOLD_MS = 500;
 const CONFIRM_MS = 4000;
 const PENDING_TIMEOUT_MS = 20000;
@@ -74,7 +75,7 @@ const STRINGS = {
     calibrate_action: "Uruchom",
     confirm_calibrate: "Potwierdź",
     calibrate_warning: "Kalibracja porusza ryglem i zapamiętuje jego skrajne położenia, a zamek może się na końcu zamknąć. Uruchamiaj ją tylko przy drzwiach i potem sprawdź, czy zamykanie i otwieranie działają we właściwą stronę.",
-    calibrate_wait: "Za {s} s",
+    wait: "Za {s} s",
     unconfirmed_lock: "Zamek nie potwierdził zamknięcia. Pokazany stan zgłosił zamek wcześniej. Sprawdź na miejscu.",
     unconfirmed_unlock: "Zamek nie potwierdził otwarcia. Pokazany stan zgłosił zamek wcześniej. Sprawdź na miejscu.",
     unconfirmed_short: "niepotwierdzone",
@@ -128,7 +129,7 @@ const STRINGS = {
     calibrate_action: "Start",
     confirm_calibrate: "Confirm",
     calibrate_warning: "Calibration moves the bolt and stores its end positions, and the lock may end up locked. Start it only at the door, then check that locking and unlocking turn the right way.",
-    calibrate_wait: "In {s} s",
+    wait: "In {s} s",
     unconfirmed_lock: "The lock did not confirm locking. The state shown is the one the lock reported before. Check on site.",
     unconfirmed_unlock: "The lock did not confirm unlocking. The state shown is the one the lock reported before. Check on site.",
     unconfirmed_short: "unconfirmed",
@@ -317,6 +318,12 @@ function toggleTarget(state) {
   return state === "locked" ? "unlock" : "lock";
 }
 
+/** Whole seconds until the time in an ISO attribute, 0 when it has passed. */
+function secondsUntil(stateObj, attribute) {
+  const until = Date.parse(stateObj?.attributes?.[attribute] || "");
+  return Number.isNaN(until) ? 0 : Math.max(0, Math.ceil((until - Date.now()) / 1000));
+}
+
 /** "lock" / "unlock" when the lock did not confirm the last command. */
 function unconfirmed(stateObj) {
   const a = stateObj?.attributes;
@@ -435,6 +442,7 @@ class RaykubeLockCard extends HTMLElement {
     this._closePanel();
     clearTimeout(this._confirmTimer);
     clearTimeout(this._pendingTimer);
+    clearTimeout(this._waitTimer);
   }
 
   /** Entity ids of the lock's device, by role. */
@@ -607,10 +615,16 @@ class RaykubeLockCard extends HTMLElement {
     const target = pending === "unlock" ? "lock" : toggleTarget(state);
     const confirming = this.confirming("tile");
     action.className = `btn btn-sm action ${confirming ? "btn-destructive" : target === "unlock" ? "btn-outline" : "btn-default"}`;
-    action.disabled = state === "unavailable" || pending === "lock";
+    // No second unlock right after a command; locking never waits.
+    const wait = target === "unlock" ? secondsUntil(stateObj, "unlock_blocked_until") : 0;
+    clearTimeout(this._waitTimer);
+    if (wait > 0) this._waitTimer = setTimeout(() => this._render(), 1000);
+    action.disabled = state === "unavailable" || pending === "lock" || wait > 0;
     action.setAttribute("aria-label", confirming ? t.confirm_unlock : t[target]);
     action.innerHTML = pending === "lock"
       ? `${icon("loader", 14, "spin")}<span>${esc(t[pending])}</span>`
+      : wait > 0
+      ? `${icon("lock-open", 14)}<span>${esc(t.wait.replace("{s}", wait))}</span>`
       : `${icon(target === "unlock" ? "lock-open" : "lock", 14)}<span>${esc(confirming ? t.confirm_short : t[target])}</span>`;
     const more = root.querySelector(".more");
     more.setAttribute("aria-label", t.more);
@@ -975,12 +989,19 @@ class RaykubeLockPanel extends HTMLElement {
     const unlockBtn = root.querySelector('[data-act="unlock"]');
     // Locking is always possible; it also drops an unlock still on its way.
     lockBtn.disabled = !lock || pending === "lock";
-    unlockBtn.disabled = unavailable;
+    const unlockWait = secondsUntil(lock, "unlock_blocked_until");
+    unlockBtn.disabled = unavailable || unlockWait > 0;
     lockBtn.className = `btn btn-lg ${target === "lock" ? "btn-default" : "btn-outline"}`;
     const confirming = this._card?.confirming("panel");
     unlockBtn.className = `btn btn-lg ${confirming ? "btn-destructive" : target === "unlock" ? "btn-default" : "btn-outline"}`;
     lockBtn.innerHTML = `${icon("lock", 16)}<span>${esc(t.lock)}</span>`;
-    unlockBtn.innerHTML = `${icon("lock-open", 16)}<span>${esc(confirming ? t.confirm_unlock : t.unlock)}</span>`;
+    const unlockLabel = unlockWait > 0 ? t.wait.replace("{s}", unlockWait) : confirming ? t.confirm_unlock : t.unlock;
+    unlockBtn.innerHTML = `${icon("lock-open", 16)}<span>${esc(unlockLabel)}</span>`;
+
+    clearTimeout(this._cooldownTimer);
+    if (unlockWait > 0 || secondsUntil(lock, "calibration_blocked_until") > 0) {
+      this._cooldownTimer = setTimeout(() => this._refresh(), 1000); // countdown
+    }
 
     // Stats
     const stats = [];
@@ -1039,11 +1060,8 @@ class RaykubeLockPanel extends HTMLElement {
     }
     if (hass.entities?.[r.lock]?.platform === "tuya_local_ble") {
       const armed = Boolean(this._confirm.calibrate);
-      const until = Date.parse(lock?.attributes?.calibration_blocked_until || "");
-      const wait = Number.isNaN(until) ? 0 : Math.ceil((until - Date.now()) / 1000);
-      clearTimeout(this._cooldownTimer);
-      if (wait > 0) this._cooldownTimer = setTimeout(() => this._refresh(), Math.min(wait, 10) * 1000);
-      const label = wait > 0 ? t.calibrate_wait.replace("{s}", wait) : armed ? t.confirm_calibrate : t.calibrate_action;
+      const wait = secondsUntil(lock, "calibration_blocked_until");
+      const label = wait > 0 ? t.wait.replace("{s}", wait) : armed ? t.confirm_calibrate : t.calibrate_action;
       rows.push(`<div class="row">${icon("crosshair", 18)}<span class="label">${esc(t.calibrate)}</span>
         <button class="btn btn-sm ${armed ? "btn-destructive" : "btn-outline"}" data-act="calibrate" ${wait > 0 ? "disabled" : ""}>${esc(label)}</button></div>`);
       if (armed) rows.push(`<div class="row hint warn">${icon("triangle-alert", 18)}<span>${esc(t.calibrate_warning)}</span></div>`);

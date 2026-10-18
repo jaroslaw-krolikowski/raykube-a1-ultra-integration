@@ -302,6 +302,9 @@ HA pokazał „zamknięte”, chociaż rygiel się nie ruszył, a kalibracje wyk
 - **Komenda nie wykona się później.** Jeśli nie dotrze do zamka w 20 s (zamknięcie: 45 s), jest
   anulowana i HA pokazuje błąd. Nic nie czeka w kolejce i nie wykonuje się po kilku minutach.
 - **Jedna komenda naraz.** Otwarcie i kalibracja są odrzucane, dopóki poprzednia komenda jest w drodze.
+- **30 s przerwy przed otwarciem.** Po każdej komendzie (zamknij, otwórz, kalibracja) kolejne otwarcie
+  i kalibracja są zablokowane na 30 s. Przycisk w karcie odlicza czas, a encja ma atrybut
+  `unlock_blocked_until`. Nie da się więc przypadkiem otworzyć drugi raz tuż po zamknięciu albo otwarciu.
 - **Zamknąć można zawsze.** Zamknięcie anuluje otwarcie albo kalibrację, które jeszcze nie dotarły do zamka.
   Nie blokuje go ani trwająca komenda, ani blokada kalibracji.
 - **Stan tylko z zamka.** Po komendzie encja pokazuje *Zamykanie…* / *Otwieranie…*. *Zamknięty* albo

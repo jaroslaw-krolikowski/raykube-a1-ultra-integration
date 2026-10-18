@@ -308,6 +308,9 @@ HA showed "locked" although the bolt had not moved, and calibrations ran with a 
 - **A command never runs late.** If it does not reach the lock within 20 s (lock: 45 s), it is dropped
   and HA shows an error. Nothing waits in a queue to run minutes later.
 - **One command at a time.** Unlock and calibration are refused while another command is on its way.
+- **30 s before the next unlock.** After any command (lock, unlock, calibration) the next unlock and
+  calibration are blocked for 30 s. The card button counts down and the entity has the attribute
+  `unlock_blocked_until`. So a second unlock right after locking or unlocking cannot happen by accident.
 - **Locking is always possible.** Lock drops an unlock or calibration that has not reached the lock yet.
   Neither a pending command nor the calibration cooldown blocks it.
 - **State only from the lock.** After a command the entity shows *Locking…* / *Unlocking…*. It shows
