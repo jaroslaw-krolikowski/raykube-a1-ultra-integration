@@ -30,6 +30,7 @@ from .commands import (
     COMMAND_LOCK,
     COMMAND_UNLOCK,
     async_calibrate,
+    friendly_errors,
     get_command_guard,
 )
 from .const import DOMAIN
@@ -433,9 +434,10 @@ class TuyaBLELock(TuyaBLEEntity, LockEntity):
         self._update_attrs()
         self.async_write_ha_state()
         try:
-            await get_command_guard(self._device).run(
-                kind, lambda: datapoint.set_value(True)
-            )
+            async with friendly_errors(self._device, kind):
+                await get_command_guard(self._device).run(
+                    kind, lambda: datapoint.set_value(True)
+                )
         except BaseException:
             if self._pending_since == since:  # not replaced by a newer command
                 self._pending_target = None
@@ -480,7 +482,8 @@ class TuyaBLELock(TuyaBLEEntity, LockEntity):
                 translation_domain=DOMAIN, translation_key="calibration_unsupported"
             )
         try:
-            await async_calibrate(self._device, dp_id, config.calibrate_value)
+            async with friendly_errors(self._device, "calibration"):
+                await async_calibrate(self._device, dp_id, config.calibrate_value)
         finally:
             self.async_write_ha_state()  # calibration time / cooldown attributes
 

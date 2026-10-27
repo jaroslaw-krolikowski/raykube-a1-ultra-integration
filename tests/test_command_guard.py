@@ -268,3 +268,44 @@ def test_no_second_unlock_for_30_s_after_a_command():
             assert fake.sent == [LOCK, LOCK, UNLOCK, UNLOCK]
 
     run(scenario)
+
+
+def test_errors_reach_the_user_as_short_messages():
+    from custom_components.tuya_local_ble import button
+    from custom_components.tuya_local_ble.raykube import get_raykube_config
+
+    async def scenario(hass):
+        device, entity, fake = await make_lock(hass)
+
+        async def unreachable(code, data, wait_for_response=True):
+            raise protocol.BleakNotFoundError()
+
+        device._send_packet = unreachable
+        with pytest.raises(HomeAssistantError) as err:
+            await entity.async_lock()
+        assert err.value.translation_key == "lock_unreachable"
+        assert "Bleak" not in str(err.value)
+
+        async def broken(code, data, wait_for_response=True):
+            raise ValueError("unexpected frame")
+
+        device._send_packet = broken
+        with pytest.raises(HomeAssistantError) as err:
+            await entity.async_lock()
+        assert err.value.translation_key == "command_failed"
+
+        config = get_raykube_config(device)
+        refresh = button.TuyaBLERaykubeRefreshButton(
+            hass, entity.coordinator, device, get_device_product_info(device), config
+        )
+
+        async def silent_update():
+            await asyncio.sleep(10)
+
+        device.update = silent_update
+        with patch.object(button, "REFRESH_DEADLINE", 0.1):
+            with pytest.raises(HomeAssistantError) as err:
+                await refresh.async_press()
+        assert err.value.translation_key == "lock_no_response"
+
+    run(scenario)

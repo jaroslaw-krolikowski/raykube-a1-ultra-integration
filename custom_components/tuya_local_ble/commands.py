@@ -18,15 +18,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from weakref import WeakKeyDictionary
 
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
 from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
-from .tuya_ble.exceptions import TuyaBLECommandTimeoutError
+from .tuya_ble.exceptions import TuyaBLECommandTimeoutError, TuyaBLEError
+from .tuya_ble.tuya_ble import BLEAK_EXCEPTIONS
+
+_LOGGER = logging.getLogger(__name__)
 
 COMMAND_LOCK = "lock"
 COMMAND_UNLOCK = "unlock"
@@ -160,3 +164,42 @@ async def async_calibrate(device: TuyaBLEDevice, dp_id: int, value: int) -> None
         await datapoint.set_value(value)
 
     await get_command_guard(device).run(COMMAND_CALIBRATE, send)
+
+
+@contextlib.asynccontextmanager
+async def friendly_errors(device: TuyaBLEDevice, action: str) -> AsyncIterator[None]:
+    """Turn BLE / protocol exceptions into short, translated messages.
+
+    The UI shows the message (the card adds the translation key as the error
+    code); the original exception goes to the log.
+    """
+    try:
+        yield
+    except HomeAssistantError:
+        raise
+    except TuyaBLECommandTimeoutError as exc:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_timeout",
+            translation_placeholders={"seconds": f"{exc.deadline:g}"},
+        ) from exc
+    except TimeoutError as exc:
+        _LOGGER.warning("%s: %s: no response from the lock", device.address, action)
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="lock_no_response"
+        ) from exc
+    except BLEAK_EXCEPTIONS as exc:
+        _LOGGER.warning("%s: %s: lock not reachable: %r", device.address, action, exc)
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="lock_unreachable"
+        ) from exc
+    except TuyaBLEError as exc:
+        _LOGGER.warning("%s: %s: lock error: %r", device.address, action, exc)
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="lock_error"
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - shown as a generic message, logged in full
+        _LOGGER.exception("%s: %s failed", device.address, action)
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="command_failed"
+        ) from exc

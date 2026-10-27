@@ -29,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .commands import friendly_errors
 from .const import DOMAIN
 from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
 from .raykube import RaykubeConfig, get_raykube_config
@@ -574,7 +575,8 @@ class TuyaBLERaykubeAutoLockTime(TuyaBLEEntity, NumberEntity, RestoreEntity):
         datapoint = self._device.datapoints.get_or_create(
             self._dp_id, TuyaBLEDataPointType.DT_VALUE, int_value
         )
-        await datapoint.set_value(int_value)
+        async with friendly_errors(self._device, "setting"):
+            await datapoint.set_value(int_value)
         self._coordinator.async_update_listeners()
 
 
