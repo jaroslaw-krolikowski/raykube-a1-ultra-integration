@@ -1,6 +1,7 @@
 """The Tuya BLE integration."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import logging
@@ -16,13 +17,16 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .commands import async_calibrate
+from .commands import async_calibrate, friendly_errors
 from .const import DOMAIN
 from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
 from .raykube import RaykubeConfig, get_raykube_config
 from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
 
 _LOGGER = logging.getLogger(__name__)
+
+# Seconds the Refresh button waits for the lock before reporting an error.
+REFRESH_DEADLINE = 30
 
 
 TuyaBLEButtonIsAvailable = Callable[["TuyaBLEButton", TuyaBLEProductInfo], bool] | None
@@ -205,7 +209,8 @@ class TuyaBLERaykubeCalibrateButton(TuyaBLEEntity, ButtonEntity):
         return self._config.sleepy or super().available
 
     async def async_press(self) -> None:
-        await async_calibrate(self._device, self._dp_id, self._config.calibrate_value)
+        async with friendly_errors(self._device, "calibration"):
+            await async_calibrate(self._device, self._dp_id, self._config.calibrate_value)
 
 
 class TuyaBLERaykubeRefreshButton(TuyaBLEEntity, ButtonEntity):
@@ -237,7 +242,10 @@ class TuyaBLERaykubeRefreshButton(TuyaBLEEntity, ButtonEntity):
         return self._config.sleepy or super().available
 
     async def async_press(self) -> None:
-        await self._device.update()
+        # Bounded: an unreachable lock would otherwise retry for minutes.
+        async with friendly_errors(self._device, "refresh"):
+            async with asyncio.timeout(REFRESH_DEADLINE):
+                await self._device.update()
 
 
 def get_raykube_buttons(

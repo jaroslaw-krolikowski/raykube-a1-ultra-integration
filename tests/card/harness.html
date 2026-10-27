@@ -71,9 +71,16 @@
     "button.calibrate": { entity_id: "button.calibrate", device_id: "d1", translation_key: "calibrate", platform: "tuya_local_ble" },
   };
   window.calls = [];
+  if (!window.toasts) {
+    window.toasts = [];
+    window.addEventListener("hass-notification", (ev) => window.toasts.push(ev.detail.message));
+  }
   window.makeHass = () => ({
     states, entities, locale: { language: "pl" }, language: "pl",
-    callService: (domain, service, data) => { window.calls.push([domain, service, data]); return Promise.resolve(); },
+    callService: (domain, service, data) => {
+      window.calls.push([domain, service, data]);
+      return window.failNext ? Promise.reject(window.failNext) : Promise.resolve();
+    },
     callWS: async (msg) => {
       window.calls.push(["ws", msg.type, msg.entity_ids]);
       const t = (h) => (now - h * 3600e3) / 1000;

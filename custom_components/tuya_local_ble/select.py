@@ -17,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .commands import friendly_errors
 from .const import (
     DOMAIN,
     FINGERBOT_MODE_PROGRAM,
@@ -405,7 +406,8 @@ class TuyaBLESelect(TuyaBLEEntity, SelectEntity, RestoreEntity):
         )
         if not datapoint:
             return
-        await datapoint.set_value(int_value)
+        async with friendly_errors(self._device, "setting"):
+            await datapoint.set_value(int_value)
         # Optimistic + sticky HA state: Raykube often ACKs V4 writes without
         # echoing DP31/DP48, and later lock events can refresh entities without
         # those DPs present.

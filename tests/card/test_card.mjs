@@ -24,6 +24,7 @@ const setLock = (state, attributes = {}) => page.evaluate(([id, s, attrs]) => {
   window.states = hass.states;
   window.card.hass = hass;
 }, [LOCK, state, attributes]);
+const toasts = () => page.evaluate(() => window.toasts.splice(0));
 const tile = page.locator("raykube-lock-card ha-card");
 const action = page.locator("raykube-lock-card .action");
 const tapTile = async () => {
@@ -139,6 +140,7 @@ assert.match(await panel.locator(".badge").textContent(), /na zamku · przed chw
 const stats = await panel.locator(".stat").allTextContents();
 assert.equal(stats.length, 3);
 assert.match(stats.join("|"), /Bateria\s*Wysoki/);
+assert.match(await panel.locator(".stat").first().getAttribute("class"), /\bgood\b/); // green
 assert.match(stats.join("|"), /Zamykanie\s*30 s/);
 assert.match(stats.join("|"), /Uzbrojenie\s*Wył/);
 const events = await panel.locator(".event").allTextContents();
@@ -174,6 +176,8 @@ assert.deepEqual(await calls(), [
   ["input_boolean", "turn_on", { entity_id: "input_boolean.zamek_uzbrojony" }],
   ["button", "press", { entity_id: "button.refresh" }],
 ]);
+await page.waitForTimeout(50);
+assert.deepEqual(await toasts(), ["Odświeżam stan zamka…", "Zamek odpowiedział, stan odświeżony"]);
 await panel.locator('[data-act="auto_lock_time"]').fill("45");
 await panel.locator('[data-act="auto_lock_time"]').press("Enter");
 await panel.locator(".status").click();
@@ -186,6 +190,8 @@ assert.match(await panel.locator(".row.hint.warn").textContent(), /tylko przy dr
 if (shots) await page.screenshot({ path: path.join(shots, "6-panel-calibrate-confirm.png") });
 await calibrate.click();
 assert.deepEqual(await calls(), [["tuya_local_ble", "calibrate", { entity_id: LOCK }]]);
+await page.waitForTimeout(50);
+assert.deepEqual(await toasts(), ["Kalibracja uruchomiona. Zamek porusza ryglem."]);
 assert.equal(await panel.locator(".row.hint.warn").count(), 0);
 // Cooldown reported by the lock entity: the button waits.
 await setLock("unlocked", { calibration_blocked_until: new Date(Date.now() + 90000).toISOString() });
@@ -195,6 +201,41 @@ await calibrate.click({ force: true });
 assert.deepEqual(await calls(), []);
 await setLock("unlocked", { calibration_blocked_until: null });
 assert.equal(await calibrate.isDisabled(), false);
+
+// Errors: the integration's message with the code on the last line;
+// anything else gets a readable text instead of the raw error.
+await page.evaluate(() => {
+  window.failNext = {
+    code: "home_assistant_error", translation_domain: "tuya_local_ble",
+    translation_key: "lock_unreachable", message: "Nie udało się połączyć z zamkiem.",
+  };
+});
+await panel.locator('[data-act="mute"]').click();
+await page.waitForTimeout(50);
+assert.deepEqual(await toasts(), ["Nie udało się połączyć z zamkiem.\n(kod błędu: lock_unreachable)"]);
+await page.evaluate(() => { window.failNext = { code: "unknown_error", message: "BleakError: org.bluez.Error.Failed" }; });
+await panel.locator('[data-act="mute"]').click();
+await page.waitForTimeout(50);
+const [raw] = await toasts();
+assert.equal(raw, "Nie udało się wykonać komendy. Sprawdź zamek na miejscu.\n(kod błędu: unknown_error)");
+await page.evaluate(() => { window.failNext = null; });
+await calls();
+
+// Battery colours: medium amber, low red
+for (const [level, tone] of [["medium", "warn"], ["low", "bad"], ["poweroff", "bad"]]) {
+  await page.evaluate((lvl) => {
+    const hass = window.makeHass();
+    hass.states["sensor.bateria"] = { state: lvl, attributes: {} };
+    window.card.hass = hass;
+  }, level);
+  assert.match(await panel.locator(".stat").first().getAttribute("class"), new RegExp(`\\b${tone}\\b`));
+}
+if (shots) await page.screenshot({ path: path.join(shots, "5b-panel-battery-low.png") });
+await page.evaluate(() => {
+  const hass = window.makeHass();
+  hass.states["sensor.bateria"] = { state: "high", attributes: {} };
+  window.card.hass = hass;
+});
 
 // Close with the X
 await panel.locator('[data-act="close"]').click();

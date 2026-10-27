@@ -10,6 +10,8 @@
  * locks. "Locking…" / "Unlocking…" stay until the lock reports its state;
  * when it does not, the card says so instead of showing the commanded state.
  * Unlocking waits 30 s after any command (countdown on the button).
+ * Refresh, calibration and errors are reported with a Home Assistant toast;
+ * an error shows a short message with the error code on its last line.
  * Calibration (tuya_local_ble.calibrate) asks for confirmation, warns what it
  * does and is available once every 2 minutes.
  *
@@ -34,7 +36,7 @@
  * Look follows shadcn/ui; icons are Lucide (https://lucide.dev, ISC license).
  */
 
-const CARD_VERSION = "1.7.0";
+const CARD_VERSION = "1.8.0";
 const HOLD_MS = 500;
 const CONFIRM_MS = 4000;
 const PENDING_TIMEOUT_MS = 20000;
@@ -79,6 +81,11 @@ const STRINGS = {
     unconfirmed_lock: "Zamek nie potwierdził zamknięcia. Pokazany stan zgłosił zamek wcześniej. Sprawdź na miejscu.",
     unconfirmed_unlock: "Zamek nie potwierdził otwarcia. Pokazany stan zgłosił zamek wcześniej. Sprawdź na miejscu.",
     unconfirmed_short: "niepotwierdzone",
+    refresh_started: "Odświeżam stan zamka…",
+    refresh_done: "Zamek odpowiedział, stan odświeżony",
+    calibrate_started: "Kalibracja uruchomiona. Zamek porusza ryglem.",
+    error_generic: "Nie udało się wykonać komendy. Sprawdź zamek na miejscu.",
+    error_code: "kod błędu",
     settings: "Ustawienia",
     history: "Ostatnie zdarzenia",
     no_history: "Brak zdarzeń z ostatnich 48 h",
@@ -133,6 +140,11 @@ const STRINGS = {
     unconfirmed_lock: "The lock did not confirm locking. The state shown is the one the lock reported before. Check on site.",
     unconfirmed_unlock: "The lock did not confirm unlocking. The state shown is the one the lock reported before. Check on site.",
     unconfirmed_short: "unconfirmed",
+    refresh_started: "Refreshing the lock status…",
+    refresh_done: "The lock answered, status refreshed",
+    calibrate_started: "Calibration started. The lock is moving the bolt.",
+    error_generic: "The command failed. Check the lock on site.",
+    error_code: "error code",
     settings: "Settings",
     history: "Recent events",
     no_history: "No events in the last 48 h",
@@ -191,6 +203,15 @@ function icon(name, size = 16, cls = "") {
     viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
     stroke-linejoin="round" aria-hidden="true">${LUCIDE[name] || ""}</svg>`;
 }
+
+// Battery level colours: good = green, medium = amber, low / empty = red.
+const BATTERY_TONES = {
+  high: "good",
+  normal: "warn",
+  medium: "warn",
+  low: "bad",
+  poweroff: "bad",
+};
 
 const BATTERY_ICONS = {
   high: "battery-full",
@@ -324,6 +345,40 @@ function secondsUntil(stateObj, attribute) {
   return Number.isNaN(until) ? 0 : Math.max(0, Math.ceil((until - Date.now()) / 1000));
 }
 
+/** Toast message for a failed action: a readable text, the code on the last line. */
+function errorMessage(t, err) {
+  // Errors raised by the integration carry a translated message and a key.
+  const ours = err && err.translation_domain === "tuya_local_ble" && err.message;
+  const code = (err && (err.translation_key || err.code)) || "unknown";
+  return `${ours || t.error_generic}\n(${t.error_code}: ${code})`;
+}
+
+/** Shows a Home Assistant toast; `from` must be inside the HA page. */
+function toast(from, message) {
+  const target = from && from.isConnected ? from : document.querySelector("home-assistant");
+  if (!target) return;
+  target.dispatchEvent(new CustomEvent("hass-notification", {
+    detail: { message }, bubbles: true, composed: true,
+  }));
+}
+
+/**
+ * Calls an action without Home Assistant's own error toast and reports the
+ * outcome with ours. Resolves to true on success.
+ */
+function callAction(hass, from, domain, service, data, success) {
+  const t = strings(hass);
+  return Promise.resolve(hass.callService(domain, service, data, undefined, false))
+    .then(() => {
+      if (success) toast(from, success);
+      return true;
+    })
+    .catch((err) => {
+      toast(from, errorMessage(t, err));
+      return false;
+    });
+}
+
 /** "lock" / "unlock" when the lock did not confirm the last command. */
 function unconfirmed(stateObj) {
   const a = stateObj?.attributes;
@@ -343,6 +398,8 @@ const SHARED_STYLE = `
     --rk-unlocked: #f59e0b;
     --rk-pending: #3b82f6;
     --rk-alert: #ef4444;
+    --rk-good: #10b981;
+    --rk-warn: #f59e0b;
     --rk-unknown: var(--rk-muted-foreground);
     --rk-destructive: #ef4444;
     --rk-radius: 12px;
@@ -506,8 +563,9 @@ class RaykubeLockCard extends HTMLElement {
     }, PENDING_TIMEOUT_MS);
     this._haptic(action === "unlock" ? "success" : "light");
     const pending = this._pending;
-    Promise.resolve(this._hass.callService("lock", action, { entity_id: this._config.entity })).catch(() => {
-      // HA shows the error; stop showing the command as on its way.
+    callAction(this._hass, this, "lock", action, { entity_id: this._config.entity }).then((ok) => {
+      if (ok) return;
+      // The toast says why; stop showing the command as on its way.
       if (this._pending === pending) this._pending = null;
       this._rerender();
     });
@@ -813,7 +871,9 @@ class RaykubeLockPanel extends HTMLElement {
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .stat .value { font-size: 15px; font-weight: 600; margin-top: 4px; }
-        .stat.low .value { color: var(--rk-alert); }
+        .stat.good .value, .stat.good .label .lucide { color: var(--rk-good); }
+        .stat.warn .value, .stat.warn .label .lucide { color: var(--rk-warn); }
+        .stat.bad .value, .stat.bad .label .lucide { color: var(--rk-alert); }
         .section-title {
           display: flex; align-items: center; gap: 8px; margin: 22px 0 8px;
           font-size: 13px; font-weight: 600; color: var(--rk-foreground);
@@ -897,9 +957,10 @@ class RaykubeLockPanel extends HTMLElement {
     });
   }
 
-  _call(domain, service, entityId, data = {}) {
+  _call(domain, service, entityId, data = {}, success = null) {
     if (!entityId) return;
-    this._hass.callService(domain, service, { entity_id: entityId, ...data });
+    // Toasts go out through the card: the panel itself lives outside the HA page.
+    callAction(this._hass, this._card, domain, service, { entity_id: entityId, ...data }, success);
   }
 
   /** Second tap within CONFIRM_MS confirms a risky action. */
@@ -939,10 +1000,13 @@ class RaykubeLockPanel extends HTMLElement {
         this._call("input_boolean", s[r.arming]?.state === "on" ? "turn_off" : "turn_on", r.arming);
         break;
       case "refresh":
-        this._call("button", "press", r.refresh);
+        toast(this._card, strings(this._hass).refresh_started);
+        this._call("button", "press", r.refresh, {}, strings(this._hass).refresh_done);
         break;
       case "calibrate":
-        if (this._confirmed("calibrate")) this._call("tuya_local_ble", "calibrate", r.lock);
+        if (this._confirmed("calibrate")) {
+          this._call("tuya_local_ble", "calibrate", r.lock, {}, strings(this._hass).calibrate_started);
+        }
         break;
       default:
         break;
@@ -1007,8 +1071,8 @@ class RaykubeLockPanel extends HTMLElement {
     const stats = [];
     const battery = r.battery && hass.states[r.battery];
     if (battery) {
-      const low = battery.state === "low" || battery.state === "poweroff";
-      stats.push([t.battery, BATTERY_ICONS[battery.state] || "battery", t[`battery_${battery.state}`] || battery.state, low]);
+      stats.push([t.battery, BATTERY_ICONS[battery.state] || "battery",
+        t[`battery_${battery.state}`] || battery.state, BATTERY_TONES[battery.state] || ""]);
     }
     const autoLock = r.auto_lock && hass.states[r.auto_lock];
     const autoTime = r.auto_lock_time && hass.states[r.auto_lock_time];
@@ -1025,8 +1089,8 @@ class RaykubeLockPanel extends HTMLElement {
     if (signal && !Number.isNaN(Number(signal.state))) {
       stats.push([t.signal, "bluetooth", `${signal.state} dBm`]);
     }
-    root.querySelector(".stats").innerHTML = stats.map(([label, ic, value, low]) => `
-      <div class="stat ${low ? "low" : ""}"><div class="label">${icon(ic, 14)}${esc(label)}</div>
+    root.querySelector(".stats").innerHTML = stats.map(([label, ic, value, tone]) => `
+      <div class="stat ${tone || ""}"><div class="label">${icon(ic, 14)}${esc(label)}</div>
       <div class="value">${esc(value)}</div></div>`).join("");
 
     // Settings

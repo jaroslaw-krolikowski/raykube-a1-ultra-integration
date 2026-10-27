@@ -148,6 +148,9 @@ Standardowego okna zamka w HA (z dużym przełącznikiem) integracja zmienić ni
   - ustawienia: tryb uzbrojenia, auto-zamykanie, czas, wyciszenie, odświeżenie stanu, kalibracja
     (z potwierdzeniem i ostrzeżeniem, najwyżej raz na 2 minuty);
   - ostatnie zdarzenia z 48 h.
+- Odświeżenie, kalibracja i błędy pokazują powiadomienie (toast) Home Assistant. Błąd to krótki opis,
+  a w ostatniej linii kod błędu, np. `(kod błędu: lock_unreachable)`. Szczegóły techniczne są w logu HA.
+- Bateria w panelu ma kolor: wysoki zielony, średni pomarańczowy, niski i wyczerpana czerwony.
 
 Dodanie: *Edytuj dashboard → Dodaj kartę →* wyszukaj **Raykube Lock**. Albo w YAML:
 

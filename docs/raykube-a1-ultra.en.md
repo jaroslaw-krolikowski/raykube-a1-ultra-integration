@@ -152,6 +152,9 @@ replaces it.
   - settings: arming mode, auto-lock, delay, mute, refresh status, calibration (with confirmation and a
     warning, at most once every 2 minutes);
   - events from the last 48 h.
+- Refresh, calibration and errors show a Home Assistant toast. An error is a short message with the
+  error code on the last line, e.g. `(error code: lock_unreachable)`. Technical details are in the HA log.
+- The battery in the panel is coloured: high green, medium amber, low and empty red.
 
 Adding it: *Edit dashboard → Add card →* search for **Raykube Lock**. Or in YAML:
 

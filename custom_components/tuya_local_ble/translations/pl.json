@@ -2,6 +2,10 @@
   "exceptions": {
     "command_timeout": "Zamek nie odebrał komendy w ciągu {seconds} s. Komenda została anulowana i nie wykona się później. Sprawdź zamek na miejscu.",
     "command_cooldown": "Otwieranie jest zablokowane przez 30 s po ostatniej komendzie. Spróbuj za {seconds} s.",
+    "lock_unreachable": "Nie udało się połączyć z zamkiem. Sprawdź zasięg Bluetooth i baterię zamka.",
+    "lock_no_response": "Zamek nie odpowiedział na czas. Sprawdź zamek na miejscu.",
+    "lock_error": "Zamek odrzucił komendę. Sprawdź zamek na miejscu.",
+    "command_failed": "Nie udało się wykonać komendy. Szczegóły są w logu Home Assistant.",
     "command_pending": "Poprzednia komenda ({command}) jeszcze nie dotarła do zamka. Poczekaj, aż się zakończy.",
     "command_replaced": "Anulowano: przed dotarciem tej komendy do zamka wysłano zamknięcie.",
     "calibration_cooldown": "Kalibracja była uruchomiona mniej niż 2 minuty temu. Spróbuj za {seconds} s.",
